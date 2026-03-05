@@ -1,4 +1,4 @@
 flask
 flask-cors
-playwright
+curl_cffi
 gunicorn
