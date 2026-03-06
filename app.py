@@ -5,6 +5,11 @@ import requests
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "polyvalue-dev-secret-change-in-prod")
+app.config.update(
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True,
+    PERMANENT_SESSION_LIFETIME=604800  # 7 days
+)
 CORS(app, supports_credentials=True, origins=[
     "https://polyvaluehtml.onrender.com",
     "http://localhost:5500", "http://127.0.0.1:5500", "null"
