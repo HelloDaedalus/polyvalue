@@ -355,9 +355,16 @@ def chat_report():
         return jsonify({"error": "Not logged in"}), 401
     data = request.json or {}
     msg_id = data.get("msgId","")
+    reported_username = data.get("username","")
     reports = read_json("chat_reports", [])
-    reports.append({"msgId": msg_id, "reportedBy": session["discord_id"], "ts": time.time()})
-    write_json("chat_reports", reports[-200:])
+    reports.append({
+        "msgId": msg_id,
+        "reportedUsername": reported_username,
+        "reportedBy": session["discord_id"],
+        "reportedByUsername": session["discord_username"],
+        "ts": time.time()
+    })
+    write_json("chat_reports", reports[-500:])
     return jsonify({"ok": True})
 
 if __name__ == "__main__":
