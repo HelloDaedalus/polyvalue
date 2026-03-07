@@ -144,6 +144,7 @@ def post_trade():
         "username":  session["discord_username"],
         "avatar":    session.get("discord_avatar",""),
         "polyUsername": (data.get("polyUsername") or "").strip()[:32] or None,
+        "polyUserId": (data.get("polyUserId") or "").strip()[:32] or None,
         "offer": offer, "want": want,
         "time": time.time()
     }
