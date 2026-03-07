@@ -4,23 +4,23 @@ from flask_cors import CORS
 import requests
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY","polyvalue-dev-secret-change-in-prod")
+app.secret_key=os.environ.get("SECRET_KEY","polyvalue-dev-secret-change-in-prod")
 
 app.config.update(
-    SESSION_COOKIE_SAMESITE="None",
-    SESSION_COOKIE_SECURE=True,
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_NAME="pv_session",
-    PERMANENT_SESSION_LIFETIME=604800
+SESSION_COOKIE_SAMESITE="None",
+SESSION_COOKIE_SECURE=True,
+SESSION_COOKIE_HTTPONLY=True,
+SESSION_COOKIE_NAME="pv_session",
+PERMANENT_SESSION_LIFETIME=604800
 )
 
 CORS(app,supports_credentials=True,origins=[
-    "https://polyvaluehtml.onrender.com",
-    "https://polyvalue.xyz",
-    "https://www.polyvalue.xyz",
-    "http://localhost:5500",
-    "http://127.0.0.1:5500",
-    "null"
+"https://polyvaluehtml.onrender.com",
+"https://polyvalue.xyz",
+"https://www.polyvalue.xyz",
+"http://localhost:5500",
+"http://127.0.0.1:5500",
+"null"
 ])
 
 TRADE_BASE="https://polytoria.trade"
@@ -70,12 +70,7 @@ def proxy_trade(path):
     item_id=request.args.get("itemid","")
     referer=f"https://polytoria.trade/store/{item_id}" if item_id else "https://polytoria.trade/"
     url=f"{TRADE_BASE}/{path}"
-    hdrs={
-        "content-type":"application/json",
-        "referer":referer,
-        "origin":"https://polytoria.trade",
-        "user-agent":"Mozilla/5.0"
-    }
+    hdrs={"content-type":"application/json","referer":referer,"origin":"https://polytoria.trade","user-agent":"Mozilla/5.0"}
     params={k:v for k,v in request.args.items() if k!="itemid"}
     try:
         if request.method=="POST":
@@ -88,10 +83,7 @@ def proxy_trade(path):
 
 @app.route("/auth/discord")
 def discord_login():
-    url=(f"https://discord.com/api/oauth2/authorize"
-         f"?client_id={DISCORD_CLIENT_ID}"
-         f"&redirect_uri={requests.utils.quote(DISCORD_REDIRECT_URI)}"
-         f"&response_type=code&scope=identify")
+    url=(f"https://discord.com/api/oauth2/authorize?client_id={DISCORD_CLIENT_ID}&redirect_uri={requests.utils.quote(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify")
     return redirect(url)
 
 @app.route("/auth/discord/callback")
@@ -100,13 +92,7 @@ def discord_callback():
     if not code:
         return redirect("https://polyvalue.xyz/?auth=error")
     try:
-        tr=requests.post("https://discord.com/api/oauth2/token",data={
-            "client_id":DISCORD_CLIENT_ID,
-            "client_secret":DISCORD_CLIENT_SECRET,
-            "grant_type":"authorization_code",
-            "code":code,
-            "redirect_uri":DISCORD_REDIRECT_URI
-        },headers={"Content-Type":"application/x-www-form-urlencoded"})
+        tr=requests.post("https://discord.com/api/oauth2/token",data={"client_id":DISCORD_CLIENT_ID,"client_secret":DISCORD_CLIENT_SECRET,"grant_type":"authorization_code","code":code,"redirect_uri":DISCORD_REDIRECT_URI},headers={"Content-Type":"application/x-www-form-urlencoded"})
         token=tr.json()
         access=token.get("access_token")
         if not access:
@@ -127,12 +113,7 @@ def auth_me():
         return jsonify({"loggedIn":False})
     did=session["discord_id"]
     av=session.get("discord_avatar","")
-    return jsonify({
-        "loggedIn":True,
-        "id":did,
-        "username":session["discord_username"],
-        "avatarUrl":f"https://cdn.discordapp.com/avatars/{did}/{av}.png?size=64" if av else None
-    })
+    return jsonify({"loggedIn":True,"id":did,"username":session["discord_username"],"avatarUrl":f"https://cdn.discordapp.com/avatars/{did}/{av}.png?size=64" if av else None})
 
 @app.route("/auth/logout",methods=["POST"])
 def logout():
@@ -170,17 +151,7 @@ def post_trade():
     mine=[t for t in trades if t.get("discordId")==session["discord_id"]]
     if len(mine)>=5:
         return jsonify({"error":"You have 5 active ads already — remove one first"}),400
-    ad={
-        "id":hashlib.md5(f"{session['discord_id']}{time.time()}".encode()).hexdigest()[:12],
-        "discordId":session["discord_id"],
-        "username":session["discord_username"],
-        "avatar":session.get("discord_avatar",""),
-        "polyUsername":(data.get("polyUsername") or "").strip()[:32] or None,
-        "polyUserId":(data.get("polyUserId") or "").strip()[:32] or None,
-        "offer":offer,
-        "want":want,
-        "time":time.time()
-    }
+    ad={"id":hashlib.md5(f"{session['discord_id']}{time.time()}".encode()).hexdigest()[:12],"discordId":session["discord_id"],"username":session["discord_username"],"avatar":session.get("discord_avatar",""),"polyUsername":(data.get("polyUsername") or "").strip()[:32] or None,"polyUserId":(data.get("polyUserId") or "").strip()[:32] or None,"offer":offer,"want":want,"time":time.time()}
     trades.insert(0,ad)
     save_trades(trades)
     return jsonify(ad)
@@ -198,6 +169,56 @@ def delete_trade(aid):
     save_trades([t for t in trades if t["id"]!=aid])
     return jsonify({"ok":True})
 
+CHAT_CUTOFF=86400
+
+def load_chat():
+    cutoff=time.time()-CHAT_CUTOFF
+    return [m for m in read_json("global_chat",[]) if m.get("ts",0)>cutoff]
+
+@app.route("/chat/messages",methods=["GET","OPTIONS"])
+def chat_messages():
+    if request.method=="OPTIONS":
+        return Response(status=200)
+    since=float(request.args.get("since",0))
+    msgs=load_chat()
+    if since:
+        msgs=[m for m in msgs if m.get("ts",0)>since]
+    return jsonify(msgs)
+
+@app.route("/chat/send",methods=["POST","OPTIONS"])
+def chat_send():
+    if request.method=="OPTIONS":
+        return Response(status=200)
+    if "discord_id" not in session:
+        return jsonify({"error":"Not logged in"}),401
+    data=request.json or {}
+    text=(data.get("text") or "").strip()[:300]
+    if not text:
+        return jsonify({"error":"Empty message"}),400
+    msgs=load_chat()
+    my_id=session["discord_id"]
+    recent=[m for m in msgs if m.get("userId")==my_id and time.time()-m.get("ts",0)<3]
+    if recent:
+        return jsonify({"error":"Slow down"}),429
+    msg={"id":hashlib.md5(f"{my_id}{time.time()}".encode()).hexdigest()[:10],"userId":my_id,"username":session["discord_username"],"avatar":session.get("discord_avatar",""),"text":text,"ts":time.time()}
+    msgs.append(msg)
+    write_json("global_chat",msgs[-500:])
+    return jsonify(msg)
+
+@app.route("/chat/report",methods=["POST","OPTIONS"])
+def chat_report():
+    if request.method=="OPTIONS":
+        return Response(status=200)
+    if "discord_id" not in session:
+        return jsonify({"error":"Not logged in"}),401
+    data=request.json or {}
+    msg_id=data.get("msgId","")
+    reported_username=data.get("username","")
+    reports=read_json("chat_reports",[])
+    reports.append({"msgId":msg_id,"reportedUsername":reported_username,"reportedBy":session["discord_id"],"reportedByUsername":session["discord_username"],"ts":time.time()})
+    write_json("chat_reports",reports[-500:])
+    return jsonify({"ok":True})
+
 DM_CUTOFF=86400
 
 def dm_key(a,b):
@@ -211,8 +232,10 @@ def load_thread(a,b):
 def save_thread(a,b,msgs):
     write_json(dm_key(a,b),msgs)
 
-@app.route("/dm/send",methods=["POST"])
+@app.route("/dm/send",methods=["POST","OPTIONS"])
 def dm_send():
+    if request.method=="OPTIONS":
+        return Response(status=200)
     if "discord_id" not in session:
         return jsonify({"error":"Not logged in"}),401
     data=request.json or {}
@@ -229,18 +252,7 @@ def dm_send():
     recent=[m for m in msgs if m.get("fromId")==from_id and time.time()-m.get("ts",0)<2]
     if recent:
         return jsonify({"error":"Slow down"}),429
-    msg={
-        "id":hashlib.md5(f"{from_id}{to_id}{time.time()}".encode()).hexdigest()[:10],
-        "fromId":from_id,
-        "fromUsername":session["discord_username"],
-        "fromAvatar":session.get("discord_avatar",""),
-        "toId":to_id,
-        "toUsername":to_name,
-        "toAvatar":to_av,
-        "text":text,
-        "ts":time.time(),
-        "read":False
-    }
+    msg={"id":hashlib.md5(f"{from_id}{to_id}{time.time()}".encode()).hexdigest()[:10],"fromId":from_id,"fromUsername":session["discord_username"],"fromAvatar":session.get("discord_avatar",""),"toId":to_id,"toUsername":to_name,"toAvatar":to_av,"text":text,"ts":time.time(),"read":False}
     msgs.append(msg)
     save_thread(from_id,to_id,msgs[-200:])
     add_to_dm_index(from_id,to_id)
@@ -273,14 +285,7 @@ def dm_inbox():
         unread=sum(1 for m in raw if m.get("fromId")==peer_id and not m.get("read"))
         peer_name=last.get("fromUsername") if last.get("fromId")==peer_id else last.get("toUsername")
         peer_av=last.get("fromAvatar") if last.get("fromId")==peer_id else last.get("toAvatar")
-        threads.append({
-            "peerId":peer_id,
-            "peerName":peer_name,
-            "peerAvatar":peer_av,
-            "lastMsg":last.get("text",""),
-            "unread":unread,
-            "ts":last.get("ts",0)
-        })
+        threads.append({"peerId":peer_id,"peerName":peer_name,"peerAvatar":peer_av,"lastMsg":last.get("text",""),"unread":unread,"ts":last.get("ts",0)})
     threads.sort(key=lambda x:x["ts"],reverse=True)
     return jsonify(threads)
 
