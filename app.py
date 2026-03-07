@@ -256,11 +256,8 @@ def dm_inbox():
     my_id = session["discord_id"]
     threads = []
     try:
-        import os, json as _json
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        if os.path.exists(data_dir):
-            for fname in os.listdir(data_dir):
-                if fname.startswith(f"dm_") and fname.endswith(".json") and my_id in fname:
+        for fname in os.listdir(DATA_DIR):
+                if fname.startswith("dm_") and fname.endswith(".json") and my_id in fname:
                     raw = read_json(fname[:-5], [])
                     cutoff = time.time() - DM_CUTOFF
                     raw = [m for m in raw if m.get("ts",0) > cutoff]
@@ -278,7 +275,7 @@ def dm_inbox():
                     last = raw[-1].get("text","") if raw else ""
                     threads.append({"peerId":peer_id,"peerName":peer_name,"peerAvatar":peer_av,"lastMsg":last,"unread":unread,"ts":raw[-1].get("ts",0) if raw else 0})
         threads.sort(key=lambda x: x["ts"], reverse=True)
-    except Exception as e:
+    except:
         pass
     return jsonify(threads)
 
@@ -290,10 +287,7 @@ def dm_unread():
     total = 0
     latest = []
     try:
-        import os
-        data_dir = os.path.join(os.path.dirname(__file__), "data")
-        if os.path.exists(data_dir):
-            for fname in os.listdir(data_dir):
+        for fname in os.listdir(DATA_DIR):
                 if fname.startswith("dm_") and fname.endswith(".json") and my_id in fname:
                     raw = read_json(fname[:-5], [])
                     cutoff = time.time() - DM_CUTOFF
