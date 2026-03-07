@@ -4,7 +4,7 @@ from flask_cors import CORS
 import requests
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "polyvalue-dev-secret-change-in-prod")
+app.secret_key = os.environ.get("SECRET_KEY","polyvalue-dev-secret-change-in-prod")
 
 app.config.update(
     SESSION_COOKIE_SAMESITE="None",
@@ -14,7 +14,7 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=604800
 )
 
-CORS(app, supports_credentials=True, origins=[
+CORS(app,supports_credentials=True,origins=[
     "https://polyvaluehtml.onrender.com",
     "https://polyvalue.xyz",
     "https://www.polyvalue.xyz",
@@ -31,14 +31,25 @@ DISCORD_REDIRECT_URI=os.environ.get("DISCORD_REDIRECT_URI","https://polyvalue.on
 DATA_DIR="/tmp/pvdata"
 os.makedirs(DATA_DIR,exist_ok=True)
 
+_cache={}
+_cache_time={}
+
 def read_json(name,default):
+    now=time.time()
+    if name in _cache and now-_cache_time.get(name,0)<2:
+        return _cache[name]
     try:
         with open(f"{DATA_DIR}/{name}.json") as f:
-            return json.load(f)
+            data=json.load(f)
+            _cache[name]=data
+            _cache_time[name]=now
+            return data
     except:
         return default
 
 def write_json(name,data):
+    _cache[name]=data
+    _cache_time[name]=time.time()
     with open(f"{DATA_DIR}/{name}.json","w") as f:
         json.dump(data,f)
 
@@ -52,8 +63,10 @@ def add_to_dm_index(a,b):
         ib.append(a)
         write_json(f"dm_index_{b}",ib)
 
-@app.route("/trade/<path:path>",methods=["GET","POST"])
+@app.route("/trade/<path:path>",methods=["GET","POST","OPTIONS"])
 def proxy_trade(path):
+    if request.method=="OPTIONS":
+        return Response(status=200)
     item_id=request.args.get("itemid","")
     referer=f"https://polytoria.trade/store/{item_id}" if item_id else "https://polytoria.trade/"
     url=f"{TRADE_BASE}/{path}"
@@ -98,8 +111,7 @@ def discord_callback():
         access=token.get("access_token")
         if not access:
             return redirect("https://polyvalue.xyz/?auth=error")
-        ur=requests.get("https://discord.com/api/users/@me",
-                        headers={"Authorization":f"Bearer {access}"})
+        ur=requests.get("https://discord.com/api/users/@me",headers={"Authorization":f"Bearer {access}"})
         u=ur.json()
         session.permanent=True
         session["discord_id"]=u["id"]
@@ -125,6 +137,65 @@ def auth_me():
 @app.route("/auth/logout",methods=["POST"])
 def logout():
     session.clear()
+    return jsonify({"ok":True})
+
+def load_trades():
+    cutoff=time.time()-86400
+    return [t for t in read_json("trades",[]) if t.get("time",0)>cutoff]
+
+def save_trades(t):
+    write_json("trades",t)
+
+@app.route("/trades",methods=["GET"])
+def get_trades():
+    q=request.args.get("q","").lower().strip()
+    trades=load_trades()
+    if q:
+        def match(ad):
+            names=[i.get("name","").lower() for i in ad.get("offer",[])+ad.get("want",[])]
+            return any(q in n for n in names) or q in ad.get("username","").lower()
+        trades=[t for t in trades if match(t)]
+    return jsonify(trades)
+
+@app.route("/trades",methods=["POST"])
+def post_trade():
+    if "discord_id" not in session:
+        return jsonify({"error":"Login with Discord first"}),401
+    data=request.json or {}
+    offer=(data.get("offer") or [])[:4]
+    want=(data.get("want") or [])[:4]
+    if not offer or not want:
+        return jsonify({"error":"Add items to both sides"}),400
+    trades=load_trades()
+    mine=[t for t in trades if t.get("discordId")==session["discord_id"]]
+    if len(mine)>=5:
+        return jsonify({"error":"You have 5 active ads already — remove one first"}),400
+    ad={
+        "id":hashlib.md5(f"{session['discord_id']}{time.time()}".encode()).hexdigest()[:12],
+        "discordId":session["discord_id"],
+        "username":session["discord_username"],
+        "avatar":session.get("discord_avatar",""),
+        "polyUsername":(data.get("polyUsername") or "").strip()[:32] or None,
+        "polyUserId":(data.get("polyUserId") or "").strip()[:32] or None,
+        "offer":offer,
+        "want":want,
+        "time":time.time()
+    }
+    trades.insert(0,ad)
+    save_trades(trades)
+    return jsonify(ad)
+
+@app.route("/trades/<aid>",methods=["DELETE"])
+def delete_trade(aid):
+    if "discord_id" not in session:
+        return jsonify({"error":"Not logged in"}),401
+    trades=load_trades()
+    ad=next((t for t in trades if t["id"]==aid),None)
+    if not ad:
+        return jsonify({"error":"Not found"}),404
+    if ad["discordId"]!=session["discord_id"]:
+        return jsonify({"error":"That's not your ad"}),403
+    save_trades([t for t in trades if t["id"]!=aid])
     return jsonify({"ok":True})
 
 DM_CUTOFF=86400
