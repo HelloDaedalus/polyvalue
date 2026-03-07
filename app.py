@@ -36,7 +36,6 @@ def write_json(name, data):
     with open(f"{DATA_DIR}/{name}.json", "w") as f:
         json.dump(data, f)
 
-# ── Proxy ──
 @app.route("/trade/<path:path>", methods=["GET","POST"])
 def proxy_trade(path):
     item_id = request.args.get("itemid","")
@@ -58,7 +57,6 @@ def proxy_trade(path):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ── Discord OAuth ──
 @app.route("/auth/discord")
 def discord_login():
     url = (f"https://discord.com/api/oauth2/authorize"
@@ -71,7 +69,7 @@ def discord_login():
 def discord_callback():
     code = request.args.get("code")
     if not code:
-        return redirect("https://polyvaluehtml.onrender.com/?auth=error")
+        return redirect("https://polyvalue.xyz/?auth=error")
     try:
         tr = requests.post("https://discord.com/api/oauth2/token", data={
             "client_id": DISCORD_CLIENT_ID, "client_secret": DISCORD_CLIENT_SECRET,
@@ -86,9 +84,9 @@ def discord_callback():
         session["discord_id"]       = u["id"]
         session["discord_username"] = u.get("global_name") or u["username"]
         session["discord_avatar"]   = u.get("avatar","")
-        return redirect("https://polyvaluehtml.onrender.com/?auth=success")
+        return redirect("https://polyvalue.xyz/?auth=success")
     except Exception as e:
-        return redirect(f"https://polyvaluehtml.onrender.com/?auth=error")
+        return redirect(f"https://polyvalue.xyz/?auth=error")
 
 @app.route("/auth/me")
 def auth_me():
@@ -107,7 +105,6 @@ def logout():
     session.clear()
     return jsonify({"ok": True})
 
-# ── Trades ──
 def load_trades():
     cutoff = time.time() - 86400
     return [t for t in read_json("trades", []) if t.get("time", 0) > cutoff]
@@ -165,7 +162,6 @@ def delete_trade(aid):
     save_trades([t for t in trades if t["id"] != aid])
     return jsonify({"ok": True})
 
-# ── Player RAP snapshots ──
 @app.route("/player-history/<pid>", methods=["GET"])
 def get_ph(pid):
     return jsonify(read_json(f"ph_{pid.replace('/','').replace('..','')}", []))
@@ -184,7 +180,6 @@ def save_ph(pid):
         write_json(f"ph_{safe}", history[-90:])
     return jsonify(history)
 
-# ── DM System ──
 DM_CUTOFF = 86400  # 24 hours
 
 def dm_key(a, b):
@@ -215,7 +210,6 @@ def dm_send():
         return jsonify({"error": "Can't DM yourself"}), 400
 
     msgs = load_thread(from_id, to_id)
-    # Rate limit: max 1 msg per 2 seconds
     my_recent = [m for m in msgs if m.get("fromId") == from_id and time.time() - m.get("ts",0) < 2]
     if my_recent:
         return jsonify({"error": "Slow down"}), 429
@@ -234,7 +228,6 @@ def dm_send():
     msgs.append(msg)
     save_thread(from_id, to_id, msgs[-200:])
 
-    # Also save to recipient's perspective
     recv_msgs = load_thread(to_id, from_id)
     recv_msgs.append(msg)
     save_thread(to_id, from_id, recv_msgs[-200:])
@@ -247,7 +240,6 @@ def dm_thread(peer_id):
         return jsonify({"error": "Not logged in"}), 401
     my_id = session["discord_id"]
     msgs = load_thread(my_id, peer_id)
-    # Mark messages from peer as read
     for m in msgs:
         if m.get("fromId") == peer_id:
             m["read"] = True
@@ -259,7 +251,6 @@ def dm_inbox():
     if "discord_id" not in session:
         return jsonify({"error": "Not logged in"}), 401
     my_id = session["discord_id"]
-    # Scan all dm files for this user
     threads = []
     try:
         import os, json as _json
@@ -315,6 +306,45 @@ def dm_unread():
 @app.route("/")
 def health():
     return jsonify({"status":"ok"})
+
+CHAT_CUTOFF = 86400
+
+def load_chat():
+    cutoff = time.time() - CHAT_CUTOFF
+    return [m for m in read_json("global_chat", []) if m.get("ts",0) > cutoff]
+
+@app.route("/chat/messages")
+def chat_messages():
+    since = float(request.args.get("since", 0))
+    msgs = load_chat()
+    if since:
+        msgs = [m for m in msgs if m.get("ts",0) > since]
+    return jsonify(msgs)
+
+@app.route("/chat/send", methods=["POST"])
+def chat_send():
+    if "discord_id" not in session:
+        return jsonify({"error": "Not logged in"}), 401
+    data = request.json or {}
+    text = (data.get("text") or "").strip()[:300]
+    if not text:
+        return jsonify({"error": "Empty message"}), 400
+    msgs = load_chat()
+    my_id = session["discord_id"]
+    recent = [m for m in msgs if m.get("userId") == my_id and time.time() - m.get("ts",0) < 2]
+    if recent:
+        return jsonify({"error": "Slow down"}), 429
+    msg = {
+        "id": hashlib.md5(f"{my_id}{time.time()}".encode()).hexdigest()[:10],
+        "userId": my_id,
+        "username": session["discord_username"],
+        "avatar": session.get("discord_avatar",""),
+        "text": text,
+        "ts": time.time()
+    }
+    msgs.append(msg)
+    write_json("global_chat", msgs[-500:])
+    return jsonify(msg)
 
 if __name__ == "__main__":
     app.run(debug=True)
