@@ -12,6 +12,8 @@ app.config.update(
 )
 CORS(app, supports_credentials=True, origins=[
     "https://polyvaluehtml.onrender.com",
+    "https://polyvalue.xyz",
+    "https://www.polyvalue.xyz",
     "http://localhost:5500", "http://127.0.0.1:5500", "null"
 ])
 
