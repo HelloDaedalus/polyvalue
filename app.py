@@ -8,7 +8,9 @@ app.secret_key = os.environ.get("SECRET_KEY", "polyvalue-dev-secret-change-in-pr
 app.config.update(
     SESSION_COOKIE_SAMESITE="None",
     SESSION_COOKIE_SECURE=True,
-    PERMANENT_SESSION_LIFETIME=604800  # 7 days
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_NAME="pv_session",
+    PERMANENT_SESSION_LIFETIME=604800
 )
 CORS(app, supports_credentials=True, origins=[
     "https://polyvaluehtml.onrender.com",
@@ -331,7 +333,7 @@ def chat_send():
         return jsonify({"error": "Empty message"}), 400
     msgs = load_chat()
     my_id = session["discord_id"]
-    recent = [m for m in msgs if m.get("userId") == my_id and time.time() - m.get("ts",0) < 2]
+    recent = [m for m in msgs if m.get("userId") == my_id and time.time() - m.get("ts",0) < 3]
     if recent:
         return jsonify({"error": "Slow down"}), 429
     msg = {
@@ -345,6 +347,17 @@ def chat_send():
     msgs.append(msg)
     write_json("global_chat", msgs[-500:])
     return jsonify(msg)
+
+@app.route("/chat/report", methods=["POST"])
+def chat_report():
+    if "discord_id" not in session:
+        return jsonify({"error": "Not logged in"}), 401
+    data = request.json or {}
+    msg_id = data.get("msgId","")
+    reports = read_json("chat_reports", [])
+    reports.append({"msgId": msg_id, "reportedBy": session["discord_id"], "ts": time.time()})
+    write_json("chat_reports", reports[-200:])
+    return jsonify({"ok": True})
 
 if __name__ == "__main__":
     app.run(debug=True)
