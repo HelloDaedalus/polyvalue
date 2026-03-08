@@ -1,26 +1,24 @@
-import os, json, time, hashlib
+import os, json, time, hashlib, base64, urllib.parse
 from flask import Flask, jsonify, request, Response, redirect, session
 from flask_cors import CORS
 import requests
 
 app = Flask(__name__)
 app.secret_key=os.environ.get("SECRET_KEY","polyvalue-dev-secret-change-in-prod")
-
 app.config.update(
-SESSION_COOKIE_SAMESITE="None",
-SESSION_COOKIE_SECURE=True,
-SESSION_COOKIE_HTTPONLY=True,
-SESSION_COOKIE_NAME="pv_session",
-PERMANENT_SESSION_LIFETIME=604800
+    SESSION_COOKIE_SAMESITE="None",
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_NAME="pv_session",
+    PERMANENT_SESSION_LIFETIME=604800
 )
-
 CORS(app,supports_credentials=True,origins=[
-"https://polyvaluehtml.onrender.com",
-"https://polyvalue.xyz",
-"https://www.polyvalue.xyz",
-"http://localhost:5500",
-"http://127.0.0.1:5500",
-"null"
+    "https://polyvaluehtml.onrender.com",
+    "https://polyvalue.xyz",
+    "https://www.polyvalue.xyz",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500",
+    "null"
 ])
 
 TRADE_BASE="https://polytoria.trade"
@@ -99,11 +97,16 @@ def discord_callback():
             return redirect("https://polyvalue.xyz/?auth=error")
         ur=requests.get("https://discord.com/api/users/@me",headers={"Authorization":f"Bearer {access}"})
         u=ur.json()
+        uid=u["id"]
+        username=u.get("global_name") or u["username"]
+        avatar=u.get("avatar","")
         session.permanent=True
-        session["discord_id"]=u["id"]
-        session["discord_username"]=u.get("global_name") or u["username"]
-        session["discord_avatar"]=u.get("avatar","")
-        return redirect("https://polyvalue.xyz/?auth=success")
+        session["discord_id"]=uid
+        session["discord_username"]=username
+        session["discord_avatar"]=avatar
+        user_json=json.dumps({"id":uid,"username":username,"avatar":avatar})
+        encoded=base64.urlsafe_b64encode(user_json.encode()).decode()
+        return redirect(f"https://polyvalue.xyz/?auth=success&u={urllib.parse.quote(encoded)}")
     except:
         return redirect("https://polyvalue.xyz/?auth=error")
 
@@ -212,10 +215,8 @@ def chat_report():
     if "discord_id" not in session:
         return jsonify({"error":"Not logged in"}),401
     data=request.json or {}
-    msg_id=data.get("msgId","")
-    reported_username=data.get("username","")
     reports=read_json("chat_reports",[])
-    reports.append({"msgId":msg_id,"reportedUsername":reported_username,"reportedBy":session["discord_id"],"reportedByUsername":session["discord_username"],"ts":time.time()})
+    reports.append({"msgId":data.get("msgId",""),"reportedUsername":data.get("username",""),"reportedBy":session["discord_id"],"reportedByUsername":session["discord_username"],"ts":time.time()})
     write_json("chat_reports",reports[-500:])
     return jsonify({"ok":True})
 
@@ -304,6 +305,24 @@ def dm_unread():
         latest.extend(new)
     latest.sort(key=lambda x:x.get("ts",0),reverse=True)
     return jsonify({"total":total,"latest":latest[:5]})
+
+@app.route("/player-history/<pid>",methods=["GET"])
+def get_ph(pid):
+    return jsonify(read_json(f"ph_{pid.replace('/','').replace('..','')}",[]))
+
+@app.route("/player-history/<pid>",methods=["POST"])
+def save_ph(pid):
+    safe=pid.replace("/","").replace("..","")
+    data=request.json or {}
+    rap=data.get("rap")
+    if rap is None:
+        return jsonify({"error":"no rap"}),400
+    history=read_json(f"ph_{safe}",[])
+    today=time.strftime("%Y-%m-%d")
+    if not history or history[-1].get("date")!=today:
+        history.append({"date":today,"rap":int(rap),"ts":time.time()})
+        write_json(f"ph_{safe}",history[-90:])
+    return jsonify(history)
 
 @app.route("/")
 def health():
